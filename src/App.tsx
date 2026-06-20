@@ -340,7 +340,14 @@ export default function App() {
   }, [rivalProfile, state.habits, state.checkins, state.challenges, state.evidence, state.scoreEvents]);
 
   if (loading) {
-    return <div className="flex min-h-screen items-center justify-center text-sm font-bold uppercase tracking-[0.3em] text-forge-green">Cargando DUALFORGE</div>;
+    return (
+      <div className="neon-grid flex min-h-screen items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <img src="/branding/logo-icon.png" alt="Icono DUALFORGE" className="size-16 object-contain drop-shadow-[0_0_20px_rgba(57,255,136,0.18)]" />
+          <p className="text-sm font-bold uppercase tracking-[0.3em] text-forge-green">Cargando DUALFORGE</p>
+        </div>
+      </div>
+    );
   }
 
   if (!state.session) {
@@ -386,4 +393,3 @@ async function singleOrNull<T>(query: PromiseLike<{ data: unknown; error: { mess
   if (error) throw new Error(error.message);
   return (data ?? null) as T | null;
 }
-

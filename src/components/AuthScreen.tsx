@@ -119,7 +119,11 @@ export function AuthScreen() {
     <main className="neon-grid flex min-h-screen items-center justify-center px-4 py-8">
       <div className="grid w-full max-w-6xl gap-8 lg:grid-cols-[1fr_460px] lg:items-center">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.28em] text-forge-green">DUALFORGE</p>
+          <img
+            src="/branding/logo-grande.png"
+            alt="Logo DUALFORGE"
+            className="h-auto w-48 object-contain drop-shadow-[0_0_18px_rgba(57,255,136,0.14)] sm:w-64 lg:w-[280px]"
+          />
           <h1 className="mt-3 max-w-3xl text-4xl font-black text-white sm:text-6xl">
             Arena privada de disciplina y rachas.
           </h1>
@@ -240,4 +244,3 @@ function PasswordInput({
     </div>
   );
 }
-

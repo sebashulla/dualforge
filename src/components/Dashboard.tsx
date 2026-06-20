@@ -148,7 +148,10 @@ function DuelStarter({
 
   return (
     <NeonCard tone="green">
-      <h2 className="text-xl font-black text-white">Crear o unirse a un duelo</h2>
+      <div className="flex items-center gap-3">
+        <img src="/branding/logo-icon.png" alt="Icono DUALFORGE" className="size-9 object-contain drop-shadow-[0_0_12px_rgba(57,255,136,0.14)]" />
+        <h2 className="text-xl font-black text-white">Crear o unirse a un duelo</h2>
+      </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_140px_auto_1fr_auto]">
         <input
           className="rounded-md border border-white/10 bg-black/30 px-3 py-3 outline-none focus:border-forge-green"
