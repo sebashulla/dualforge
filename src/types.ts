@@ -1,12 +1,14 @@
 import type { Session } from '@supabase/supabase-js';
 
-export type View = 'dashboard' | 'arena' | 'habits' | 'challenges' | 'evidence';
+export type View = 'dashboard' | 'profile' | 'users' | 'arena' | 'habits' | 'challenges' | 'openChallenges' | 'library' | 'evidence';
 
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'legendary';
 export type Visibility = 'private' | 'shared_progress' | 'shared_full' | 'duel' | 'public';
 export type ChallengeStatus = 'pending' | 'submitted' | 'approved' | 'rejected' | 'expired' | 'needs_changes';
 export type ContinuationStatus = 'undecided' | 'finished' | 'continued';
 export type EvidenceType = 'image' | 'text' | 'document' | 'link' | 'reflection';
+export type OpenChallengeStatus = 'open' | 'active' | 'completed' | 'cancelled';
+export type OpenChallengeParticipantStatus = 'joined' | 'completed' | 'left';
 
 export type Profile = {
   id: string;
@@ -29,6 +31,8 @@ export type Duel = {
   rescue_cooldown_days: number;
   invite_code: string;
   created_by: string;
+  winner_user_id?: string | null;
+  status?: 'active' | 'completed' | 'cancelled';
 };
 
 export type DuelMember = {
@@ -134,6 +138,88 @@ export type ScoreEvent = {
   created_at: string;
 };
 
+export type ProfileStats = {
+  user_id: string;
+  duels_won: number;
+  duel_streak: number;
+  open_challenges_completed: number;
+  updated_at: string;
+};
+
+export type OpenChallenge = {
+  id: string;
+  creator_user_id: string;
+  title: string;
+  description: string;
+  category: string;
+  difficulty: Difficulty;
+  points: number;
+  min_participants: number;
+  max_participants: number;
+  starts_at: string | null;
+  ends_at: string | null;
+  evidence_type: EvidenceType;
+  rules: string;
+  status: OpenChallengeStatus;
+  created_at: string;
+  updated_at: string;
+  profiles?: Profile;
+};
+
+export type OpenChallengeParticipant = {
+  id: string;
+  challenge_id: string;
+  user_id: string;
+  status: OpenChallengeParticipantStatus;
+  joined_at: string;
+  completed_at: string | null;
+  profiles?: Profile;
+};
+
+export type LibraryCourse = {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string;
+  visibility: Visibility;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibraryTopic = {
+  id: string;
+  course_id: string;
+  user_id: string;
+  title: string;
+  summary: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibraryNote = {
+  id: string;
+  topic_id: string;
+  user_id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LibraryFlashcard = {
+  id: string;
+  topic_id: string;
+  user_id: string;
+  question: string;
+  answer: string;
+  difficulty: Difficulty;
+  next_review_on: string;
+  success_count: number;
+  failure_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
 export type AppState = {
   session: Session | null;
   profile: Profile | null;
@@ -146,6 +232,14 @@ export type AppState = {
   reviews: ChallengeReview[];
   scoreEvents: ScoreEvent[];
   logs: ActivityLog[];
+  publicProfiles: Profile[];
+  profileStats: ProfileStats[];
+  openChallenges: OpenChallenge[];
+  openChallengeParticipants: OpenChallengeParticipant[];
+  libraryCourses: LibraryCourse[];
+  libraryTopics: LibraryTopic[];
+  libraryNotes: LibraryNote[];
+  libraryFlashcards: LibraryFlashcard[];
 };
 
 export type UserMetrics = {

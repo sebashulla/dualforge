@@ -104,6 +104,7 @@ export function AuthScreen() {
       if (!upload.error) {
         const { data } = supabase.storage.from('avatars').getPublicUrl(path);
         await supabase.from('profiles').update({ avatar_url: data.publicUrl }).eq('id', result.data.user.id);
+        window.dispatchEvent(new Event('dualforge:profile-updated'));
       }
     }
 
@@ -111,7 +112,7 @@ export function AuthScreen() {
     setMessage(
       result.data.session
         ? 'Cuenta creada. Perfil inicial listo.'
-        : 'Cuenta creada. Revisa tu correo para confirmar y luego inicia sesión.',
+        : 'Cuenta creada. Revisa tu correo para confirmar y luego inicia sesión. Podrás cargar o cambiar tu foto desde Mi perfil.',
     );
   }
 

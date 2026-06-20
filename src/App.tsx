@@ -6,8 +6,12 @@ import { ChallengeCenter, type EvidencePayload, type NewChallenge } from './comp
 import { Dashboard } from './components/Dashboard';
 import { EvidenceCenter } from './components/EvidenceCenter';
 import { HabitBoard, type NewHabit } from './components/HabitBoard';
+import { LibraryBoard, type NewCourse, type NewFlashcard, type NewNote, type NewTopic } from './components/LibraryBoard';
 import { Layout } from './components/Layout';
+import { OpenChallengesBoard, type NewOpenChallenge } from './components/OpenChallengesBoard';
 import { ProfileSetup, type ProfileUpdate } from './components/ProfileSetup';
+import { ProfileHub, type PublicProfileUpdate } from './components/ProfileHub';
+import { UsersDirectory } from './components/UsersDirectory';
 import { buildMetrics, isoDate } from './lib/metrics';
 import { supabase } from './lib/supabase';
 import type {
@@ -19,7 +23,14 @@ import type {
   DuelMember,
   Habit,
   HabitCheckin,
+  LibraryCourse,
+  LibraryFlashcard,
+  LibraryNote,
+  LibraryTopic,
+  OpenChallenge,
+  OpenChallengeParticipant,
   Profile,
+  ProfileStats,
   RecoveryChallenge,
   ScoreEvent,
   View,
@@ -37,6 +48,14 @@ const emptyState: AppState = {
   reviews: [],
   scoreEvents: [],
   logs: [],
+  publicProfiles: [],
+  profileStats: [],
+  openChallenges: [],
+  openChallengeParticipants: [],
+  libraryCourses: [],
+  libraryTopics: [],
+  libraryNotes: [],
+  libraryFlashcards: [],
 };
 
 export default function App() {
@@ -72,6 +91,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    function reloadProfile() {
+      if (state.session) void loadData(state.session);
+    }
+    window.addEventListener('dualforge:profile-updated', reloadProfile);
+    return () => window.removeEventListener('dualforge:profile-updated', reloadProfile);
+  }, [state.session]);
+
+  useEffect(() => {
     if (!supabase || !state.duel?.id || !state.session) return;
     const client = supabase;
     const channel = client
@@ -103,8 +130,43 @@ export default function App() {
       let reviews: ChallengeReview[] = [];
       let scoreEvents: ScoreEvent[] = [];
       let logs: ActivityLog[] = [];
+      let publicProfiles: Profile[] = [];
+      let profileStats: ProfileStats[] = [];
+      let openChallenges: OpenChallenge[] = [];
+      let openChallengeParticipants: OpenChallengeParticipant[] = [];
+      let libraryCourses: LibraryCourse[] = [];
+      let libraryTopics: LibraryTopic[] = [];
+      let libraryNotes: LibraryNote[] = [];
+      let libraryFlashcards: LibraryFlashcard[] = [];
 
       if (profile) {
+        publicProfiles = await optionalList<Profile>(
+          supabase.from('profiles').select('*').order('display_name', { ascending: true }).limit(80),
+        );
+        profileStats = await optionalList<ProfileStats>(
+          supabase.from('profile_stats').select('*'),
+        );
+        openChallenges = await optionalList<OpenChallenge>(
+          supabase.from('open_challenges').select('*').order('created_at', { ascending: false }).limit(80),
+        );
+        openChallengeParticipants = await optionalList<OpenChallengeParticipant>(
+          supabase.from('open_challenge_participants').select('*').order('joined_at', { ascending: false }),
+        );
+        libraryCourses = await optionalList<LibraryCourse>(
+          supabase.from('library_courses').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }),
+        );
+        const courseIds = libraryCourses.map((course) => course.id);
+        libraryTopics = courseIds.length
+          ? await optionalList<LibraryTopic>(supabase.from('library_topics').select('*').in('course_id', courseIds).order('created_at', { ascending: false }))
+          : [];
+        const topicIds = libraryTopics.map((topic) => topic.id);
+        libraryNotes = topicIds.length
+          ? await optionalList<LibraryNote>(supabase.from('library_topic_notes').select('*').in('topic_id', topicIds).order('created_at', { ascending: false }))
+          : [];
+        libraryFlashcards = topicIds.length
+          ? await optionalList<LibraryFlashcard>(supabase.from('library_topic_flashcards').select('*').in('topic_id', topicIds).order('created_at', { ascending: false }))
+          : [];
+
         const myMemberships = await list<DuelMember>(
           supabase.from('duel_members').select('*, profiles(*)').eq('user_id', session.user.id).limit(1),
         );
@@ -137,7 +199,27 @@ export default function App() {
         }
       }
 
-      setState({ session, profile, duel, members, habits, checkins, challenges, evidence, reviews, scoreEvents, logs });
+      setState({
+        session,
+        profile,
+        duel,
+        members,
+        habits,
+        checkins,
+        challenges,
+        evidence,
+        reviews,
+        scoreEvents,
+        logs,
+        publicProfiles,
+        profileStats,
+        openChallenges,
+        openChallengeParticipants,
+        libraryCourses,
+        libraryTopics,
+        libraryNotes,
+        libraryFlashcards,
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Error cargando datos');
     } finally {
@@ -173,6 +255,33 @@ export default function App() {
       return;
     }
     await supabase.from('profile_private').upsert({ id: state.session.user.id, full_name: profileInput.full_name });
+    await supabase.from('profile_stats').upsert({ user_id: state.session.user.id });
+    await loadData(state.session);
+  }
+
+  async function updatePublicProfile(profileInput: PublicProfileUpdate) {
+    if (!supabase || !state.session || !state.profile) return;
+    let avatarUrl = state.profile.avatar_url;
+    if (profileInput.avatar_file) {
+      const path = `${state.session.user.id}/${Date.now()}-${profileInput.avatar_file.name}`;
+      const upload = await supabase.storage.from('avatars').upload(path, profileInput.avatar_file, { upsert: true });
+      if (upload.error) {
+        setError(upload.error.message);
+        return;
+      }
+      avatarUrl = supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+    }
+    const { error: requestError } = await supabase.from('profiles').update({
+      display_name: profileInput.display_name,
+      username: profileInput.username,
+      description: profileInput.description,
+      motto: profileInput.motto,
+      avatar_url: avatarUrl,
+    }).eq('id', state.profile.id);
+    if (requestError) {
+      setError(requestError.message);
+      return;
+    }
     await loadData(state.session);
   }
 
@@ -324,6 +433,96 @@ export default function App() {
     await loadData(state.session);
   }
 
+  async function createOpenChallenge(challenge: NewOpenChallenge) {
+    if (!supabase || !state.session || !state.profile) return;
+    const { data, error: requestError } = await supabase.from('open_challenges').insert({
+        ...challenge,
+        creator_user_id: state.profile.id,
+        starts_at: challenge.starts_at ? new Date(challenge.starts_at).toISOString() : null,
+        ends_at: challenge.ends_at ? new Date(challenge.ends_at).toISOString() : null,
+      })
+      .select()
+      .single();
+    if (requestError) setError(requestError.message);
+    if (data) {
+      await supabase.from('open_challenge_participants').insert({
+        challenge_id: data.id,
+        user_id: state.profile.id,
+        status: 'joined',
+      });
+    }
+    await loadData(state.session);
+  }
+
+  async function joinOpenChallenge(challenge: OpenChallenge) {
+    if (!supabase || !state.session || !state.profile) return;
+    const currentParticipants = state.openChallengeParticipants.filter((participant) => participant.challenge_id === challenge.id && participant.status !== 'left').length;
+    if (currentParticipants >= challenge.max_participants) {
+      setError('Este reto ya alcanzó el máximo de participantes.');
+      return;
+    }
+    const { error: requestError } = await supabase.from('open_challenge_participants').upsert({
+      challenge_id: challenge.id,
+      user_id: state.profile.id,
+      status: 'joined',
+    });
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
+  async function completeOpenChallenge(challenge: OpenChallenge) {
+    if (!supabase || !state.session || !state.profile) return;
+    await supabase
+      .from('open_challenge_participants')
+      .update({ status: 'completed', completed_at: new Date().toISOString() })
+      .eq('challenge_id', challenge.id)
+      .eq('user_id', state.profile.id);
+    await supabase.from('score_events').insert({
+      user_id: state.profile.id,
+      duel_id: null,
+      source_type: 'open_challenge',
+      source_id: challenge.id,
+      points: challenge.points,
+      reason: `Reto abierto completado: ${challenge.title}`,
+    });
+    const currentStats = state.profileStats.find((stats) => stats.user_id === state.profile?.id);
+    await supabase.from('profile_stats').upsert({
+      user_id: state.profile.id,
+      duels_won: currentStats?.duels_won ?? 0,
+      duel_streak: currentStats?.duel_streak ?? 0,
+      open_challenges_completed: (currentStats?.open_challenges_completed ?? 0) + 1,
+    });
+    await loadData(state.session);
+  }
+
+  async function createCourse(course: NewCourse) {
+    if (!supabase || !state.session || !state.profile) return;
+    const { error: requestError } = await supabase.from('library_courses').insert({ ...course, user_id: state.profile.id });
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
+  async function createTopic(topic: NewTopic) {
+    if (!supabase || !state.session || !state.profile) return;
+    const { error: requestError } = await supabase.from('library_topics').insert({ ...topic, user_id: state.profile.id });
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
+  async function createNote(note: NewNote) {
+    if (!supabase || !state.session || !state.profile) return;
+    const { error: requestError } = await supabase.from('library_topic_notes').insert({ ...note, user_id: state.profile.id });
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
+  async function createFlashcard(flashcard: NewFlashcard) {
+    if (!supabase || !state.session || !state.profile) return;
+    const { error: requestError } = await supabase.from('library_topic_flashcards').insert({ ...flashcard, user_id: state.profile.id });
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
   const rivalProfile = useMemo(() => {
     if (!state.profile) return null;
     return state.members.find((member) => member.user_id !== state.profile?.id)?.profiles ?? null;
@@ -368,12 +567,24 @@ export default function App() {
       {view === 'dashboard' ? (
         <Dashboard duel={state.duel} mine={mineMetrics} rival={rivalMetrics} pendingChallenge={pendingChallenge} onCreateDuel={createDuel} onJoinDuel={joinDuel} />
       ) : null}
+      {view === 'profile' ? (
+        <ProfileHub currentProfile={state.profile} stats={state.profileStats.find((stats) => stats.user_id === state.profile?.id)} onUpdateProfile={updatePublicProfile} />
+      ) : null}
+      {view === 'users' ? (
+        <UsersDirectory currentUserId={state.profile.id} profiles={state.publicProfiles.length ? state.publicProfiles : [state.profile]} stats={state.profileStats} />
+      ) : null}
       {view === 'arena' ? <Arena mine={mineMetrics} rival={rivalMetrics} members={state.members} /> : null}
       {view === 'habits' ? (
         <HabitBoard habits={state.habits} checkins={state.checkins} userId={state.profile.id} duelId={state.duel?.id ?? null} onCreateHabit={createHabit} onToggleCheckin={toggleCheckin} />
       ) : null}
       {view === 'challenges' ? (
         <ChallengeCenter userId={state.profile.id} duelId={state.duel?.id ?? null} rival={rivalProfile} challenges={state.challenges} evidence={state.evidence} onCreateChallenge={createChallenge} onSubmitEvidence={submitEvidence} onReviewEvidence={reviewEvidence} onDecideChallenge={decideChallenge} />
+      ) : null}
+      {view === 'openChallenges' ? (
+        <OpenChallengesBoard userId={state.profile.id} profiles={state.publicProfiles} challenges={state.openChallenges} participants={state.openChallengeParticipants} onCreateChallenge={createOpenChallenge} onJoinChallenge={joinOpenChallenge} onCompleteChallenge={completeOpenChallenge} />
+      ) : null}
+      {view === 'library' ? (
+        <LibraryBoard courses={state.libraryCourses} topics={state.libraryTopics} notes={state.libraryNotes} flashcards={state.libraryFlashcards} onCreateCourse={createCourse} onCreateTopic={createTopic} onCreateNote={createNote} onCreateFlashcard={createFlashcard} />
       ) : null}
       {view === 'evidence' ? (
         <EvidenceCenter evidence={state.evidence} challenges={state.challenges} logs={state.logs} onSoftDeleteEvidence={softDeleteEvidence} />
@@ -392,4 +603,10 @@ async function singleOrNull<T>(query: PromiseLike<{ data: unknown; error: { mess
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   return (data ?? null) as T | null;
+}
+
+async function optionalList<T>(query: PromiseLike<{ data: unknown; error: { message: string } | null }>) {
+  const { data, error } = await query;
+  if (error) return [];
+  return (data ?? []) as T[];
 }
