@@ -1,0 +1,18 @@
+{
+  "name": "DUALFORGE",
+  "short_name": "DUALFORGE",
+  "description": "Duelos de disciplina, habitos, metas y recuperacion.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050607",
+  "theme_color": "#050607",
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
+
