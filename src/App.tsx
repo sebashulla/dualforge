@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { Arena } from './components/Arena';
 import { AuthScreen } from './components/AuthScreen';
+import { ChatCenter, detectAttachmentKind, type NewChatMessage } from './components/ChatCenter';
 import { ChallengeCenter, type EvidencePayload, type NewChallenge } from './components/ChallengeCenter';
 import { Dashboard } from './components/Dashboard';
 import { EvidenceCenter } from './components/EvidenceCenter';
@@ -19,6 +20,9 @@ import type {
   AppState,
   ChallengeEvidence,
   ChallengeReview,
+  ChatMessage,
+  ChatParticipant,
+  ChatThread,
   Duel,
   DuelMember,
   Habit,
@@ -26,6 +30,7 @@ import type {
   LibraryCourse,
   LibraryFlashcard,
   LibraryNote,
+  LibraryShare,
   LibraryTopic,
   OpenChallenge,
   OpenChallengeParticipant,
@@ -33,6 +38,7 @@ import type {
   ProfileStats,
   RecoveryChallenge,
   ScoreEvent,
+  Visibility,
   View,
 } from './types';
 
@@ -56,11 +62,16 @@ const emptyState: AppState = {
   libraryTopics: [],
   libraryNotes: [],
   libraryFlashcards: [],
+  libraryShares: [],
+  chatThreads: [],
+  chatParticipants: [],
+  chatMessages: [],
 };
 
 export default function App() {
   const [state, setState] = useState<AppState>(emptyState);
   const [view, setView] = useState<View>('dashboard');
+  const [activeChatThreadId, setActiveChatThreadId] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(supabase));
   const [error, setError] = useState('');
 
@@ -113,6 +124,22 @@ export default function App() {
     };
   }, [state.duel?.id, state.session]);
 
+  useEffect(() => {
+    if (!supabase || !state.session) return;
+    const session = state.session;
+    const client = supabase;
+    const channel = client
+      .channel(`dualforge-social-${session.user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_threads' }, () => void loadData(session))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_participants' }, () => void loadData(session))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, () => void loadData(session))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'library_shares' }, () => void loadData(session))
+      .subscribe();
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [state.session?.user.id]);
+
   async function loadData(session: Session) {
     if (!supabase) return;
     setLoading(true);
@@ -138,6 +165,10 @@ export default function App() {
       let libraryTopics: LibraryTopic[] = [];
       let libraryNotes: LibraryNote[] = [];
       let libraryFlashcards: LibraryFlashcard[] = [];
+      let libraryShares: LibraryShare[] = [];
+      let chatThreads: ChatThread[] = [];
+      let chatParticipants: ChatParticipant[] = [];
+      let chatMessages: ChatMessage[] = [];
 
       if (profile) {
         publicProfiles = await optionalList<Profile>(
@@ -152,9 +183,23 @@ export default function App() {
         openChallengeParticipants = await optionalList<OpenChallengeParticipant>(
           supabase.from('open_challenge_participants').select('*').order('joined_at', { ascending: false }),
         );
-        libraryCourses = await optionalList<LibraryCourse>(
+        libraryShares = await optionalList<LibraryShare>(
+          supabase.from('library_shares').select('*').order('created_at', { ascending: false }),
+        );
+
+        const ownCourses = await optionalList<LibraryCourse>(
           supabase.from('library_courses').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false }),
         );
+        const sharedCourseIds = libraryShares
+          .filter((share) => share.owner_user_id === session.user.id || share.recipient_user_id === session.user.id)
+          .map((share) => share.course_id);
+        const sharedCourses = sharedCourseIds.length
+          ? await optionalList<LibraryCourse>(supabase.from('library_courses').select('*').in('id', sharedCourseIds))
+          : [];
+        const publicCourses = await optionalList<LibraryCourse>(
+          supabase.from('library_courses').select('*').eq('visibility', 'public').order('created_at', { ascending: false }).limit(40),
+        );
+        libraryCourses = uniqueById([...ownCourses, ...sharedCourses, ...publicCourses]);
         const courseIds = libraryCourses.map((course) => course.id);
         libraryTopics = courseIds.length
           ? await optionalList<LibraryTopic>(supabase.from('library_topics').select('*').in('course_id', courseIds).order('created_at', { ascending: false }))
@@ -166,6 +211,25 @@ export default function App() {
         libraryFlashcards = topicIds.length
           ? await optionalList<LibraryFlashcard>(supabase.from('library_topic_flashcards').select('*').in('topic_id', topicIds).order('created_at', { ascending: false }))
           : [];
+
+        const now = new Date().toISOString();
+        await supabase.rpc('purge_expired_chat_data');
+        chatThreads = await optionalList<ChatThread>(
+          supabase.from('chat_threads').select('*').gt('expires_at', now).order('updated_at', { ascending: false }).limit(50),
+        );
+        const threadIds = chatThreads.map((thread) => thread.id);
+        chatParticipants = threadIds.length
+          ? await optionalList<ChatParticipant>(supabase.from('chat_participants').select('*, profiles(*)').in('thread_id', threadIds))
+          : [];
+        const loadedMessages = threadIds.length
+          ? await optionalList<ChatMessage>(supabase.from('chat_messages').select('*').in('thread_id', threadIds).gt('expires_at', now).is('deleted_at', null).order('created_at', { ascending: true }).limit(240))
+          : [];
+        const client = supabase;
+        chatMessages = await Promise.all(loadedMessages.map(async (message) => {
+          if (!message.attachment_path) return message;
+          const signed = await client.storage.from('chat-media').createSignedUrl(message.attachment_path, 60 * 60);
+          return { ...message, attachment_url: signed.data?.signedUrl ?? null };
+        }));
 
         const myMemberships = await list<DuelMember>(
           supabase.from('duel_members').select('*, profiles(*)').eq('user_id', session.user.id).limit(1),
@@ -219,6 +283,10 @@ export default function App() {
         libraryTopics,
         libraryNotes,
         libraryFlashcards,
+        libraryShares,
+        chatThreads,
+        chatParticipants,
+        chatMessages,
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Error cargando datos');
@@ -495,6 +563,189 @@ export default function App() {
     await loadData(state.session);
   }
 
+  async function startChat(peerUserId: string) {
+    if (!supabase || !state.session || !state.profile) return null;
+    if (peerUserId === state.profile.id) {
+      setError('No puedes abrir un chat contigo mismo.');
+      return null;
+    }
+
+    const existingThread = state.chatThreads.find((thread) => {
+      const participantIds = state.chatParticipants
+        .filter((participant) => participant.thread_id === thread.id)
+        .map((participant) => participant.user_id);
+      return participantIds.includes(state.profile!.id)
+        && participantIds.includes(peerUserId)
+        && new Date(thread.expires_at).getTime() > Date.now();
+    });
+
+    if (existingThread) return existingThread.id;
+
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const { data, error: threadError } = await supabase
+      .from('chat_threads')
+      .insert({ created_by: state.profile.id, expires_at: expiresAt, created_timezone: timezone })
+      .select()
+      .single();
+    if (threadError) {
+      setError(threadError.message);
+      return null;
+    }
+
+    const { error: participantsError } = await supabase.from('chat_participants').insert([
+      { thread_id: data.id, user_id: state.profile.id },
+      { thread_id: data.id, user_id: peerUserId },
+    ]);
+    if (participantsError) {
+      setError(participantsError.message);
+      return null;
+    }
+
+    await loadData(state.session);
+    return data.id as string;
+  }
+
+  async function openChatWithUser(userId: string) {
+    const threadId = await startChat(userId);
+    if (!threadId) return;
+    setActiveChatThreadId(threadId);
+    setView('messages');
+  }
+
+  async function sendChatMessage(threadId: string, message: NewChatMessage) {
+    if (!supabase || !state.session || !state.profile) return;
+    const thread = state.chatThreads.find((item) => item.id === threadId);
+    if (!thread || new Date(thread.expires_at).getTime() <= Date.now()) {
+      setError('Este chat ya expiró.');
+      return;
+    }
+    if (message.file && message.file.size > 25 * 1024 * 1024) {
+      setError('El archivo supera el límite de 25 MB.');
+      return;
+    }
+
+    let attachmentPath: string | null = null;
+    let attachmentKind: ReturnType<typeof detectAttachmentKind> | null = null;
+    if (message.file) {
+      attachmentKind = detectAttachmentKind(message.file);
+      attachmentPath = `${threadId}/${state.profile.id}/${Date.now()}-${sanitizeFileName(message.file.name)}`;
+      const { error: uploadError } = await supabase.storage.from('chat-media').upload(attachmentPath, message.file);
+      if (uploadError) {
+        setError(uploadError.message);
+        return;
+      }
+    }
+
+    const { error: requestError } = await supabase.from('chat_messages').insert({
+      thread_id: threadId,
+      sender_id: state.profile.id,
+      body: message.body.trim() || null,
+      attachment_kind: attachmentKind,
+      attachment_path: attachmentPath,
+      attachment_name: message.file?.name ?? null,
+      attachment_mime: message.file?.type || null,
+      attachment_size: message.file?.size ?? null,
+    });
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
+  async function shareCourse(course: LibraryCourse, recipientUserId: string) {
+    if (!supabase || !state.session || !state.profile) return;
+    if (course.user_id !== state.profile.id) {
+      setError('Solo puedes compartir cursos que son tuyos.');
+      return;
+    }
+    const { error: requestError } = await supabase.from('library_shares').upsert({
+      course_id: course.id,
+      owner_user_id: state.profile.id,
+      recipient_user_id: recipientUserId,
+    }, { onConflict: 'course_id,recipient_user_id' });
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
+  async function updateCourseVisibility(course: LibraryCourse, visibility: Visibility) {
+    if (!supabase || !state.session || !state.profile) return;
+    if (course.user_id !== state.profile.id) {
+      setError('Solo puedes cambiar la visibilidad de tus cursos.');
+      return;
+    }
+    const { error: requestError } = await supabase.from('library_courses').update({ visibility }).eq('id', course.id);
+    if (requestError) setError(requestError.message);
+    await loadData(state.session);
+  }
+
+  async function cloneLibraryCourse(course: LibraryCourse) {
+    if (!supabase || !state.session || !state.profile) return;
+    if (course.user_id === state.profile.id) return;
+
+    const { data: newCourse, error: courseError } = await supabase
+      .from('library_courses')
+      .insert({
+        user_id: state.profile.id,
+        title: `${course.title} (copia)`,
+        description: course.description,
+        visibility: 'private',
+      })
+      .select()
+      .single();
+    if (courseError) {
+      setError(courseError.message);
+      return;
+    }
+
+    const sourceTopics = state.libraryTopics.filter((topic) => topic.course_id === course.id);
+    for (const topic of sourceTopics) {
+      const { data: newTopic, error: topicError } = await supabase
+        .from('library_topics')
+        .insert({
+          course_id: newCourse.id,
+          user_id: state.profile.id,
+          title: topic.title,
+          summary: topic.summary,
+        })
+        .select()
+        .single();
+      if (topicError) {
+        setError(topicError.message);
+        return;
+      }
+
+      const sourceNotes = state.libraryNotes.filter((note) => note.topic_id === topic.id);
+      if (sourceNotes.length) {
+        const { error: notesError } = await supabase.from('library_topic_notes').insert(sourceNotes.map((note) => ({
+          topic_id: newTopic.id,
+          user_id: state.profile!.id,
+          title: note.title,
+          body: note.body,
+        })));
+        if (notesError) {
+          setError(notesError.message);
+          return;
+        }
+      }
+
+      const sourceFlashcards = state.libraryFlashcards.filter((flashcard) => flashcard.topic_id === topic.id);
+      if (sourceFlashcards.length) {
+        const { error: flashcardsError } = await supabase.from('library_topic_flashcards').insert(sourceFlashcards.map((flashcard) => ({
+          topic_id: newTopic.id,
+          user_id: state.profile!.id,
+          question: flashcard.question,
+          answer: flashcard.answer,
+          difficulty: flashcard.difficulty,
+        })));
+        if (flashcardsError) {
+          setError(flashcardsError.message);
+          return;
+        }
+      }
+    }
+
+    await loadData(state.session);
+  }
+
   async function createCourse(course: NewCourse) {
     if (!supabase || !state.session || !state.profile) return;
     const { error: requestError } = await supabase.from('library_courses').insert({ ...course, user_id: state.profile.id });
@@ -571,7 +822,19 @@ export default function App() {
         <ProfileHub currentProfile={state.profile} stats={state.profileStats.find((stats) => stats.user_id === state.profile?.id)} onUpdateProfile={updatePublicProfile} />
       ) : null}
       {view === 'users' ? (
-        <UsersDirectory currentUserId={state.profile.id} profiles={state.publicProfiles.length ? state.publicProfiles : [state.profile]} stats={state.profileStats} />
+        <UsersDirectory currentUserId={state.profile.id} profiles={state.publicProfiles.length ? state.publicProfiles : [state.profile]} stats={state.profileStats} onStartChat={openChatWithUser} />
+      ) : null}
+      {view === 'messages' ? (
+        <ChatCenter
+          currentUserId={state.profile.id}
+          profiles={state.publicProfiles.length ? state.publicProfiles : [state.profile]}
+          threads={state.chatThreads}
+          participants={state.chatParticipants}
+          messages={state.chatMessages}
+          initialThreadId={activeChatThreadId}
+          onStartChat={startChat}
+          onSendMessage={sendChatMessage}
+        />
       ) : null}
       {view === 'arena' ? <Arena mine={mineMetrics} rival={rivalMetrics} members={state.members} /> : null}
       {view === 'habits' ? (
@@ -584,7 +847,22 @@ export default function App() {
         <OpenChallengesBoard userId={state.profile.id} profiles={state.publicProfiles} challenges={state.openChallenges} participants={state.openChallengeParticipants} onCreateChallenge={createOpenChallenge} onJoinChallenge={joinOpenChallenge} onCompleteChallenge={completeOpenChallenge} />
       ) : null}
       {view === 'library' ? (
-        <LibraryBoard courses={state.libraryCourses} topics={state.libraryTopics} notes={state.libraryNotes} flashcards={state.libraryFlashcards} onCreateCourse={createCourse} onCreateTopic={createTopic} onCreateNote={createNote} onCreateFlashcard={createFlashcard} />
+        <LibraryBoard
+          currentUserId={state.profile.id}
+          courses={state.libraryCourses}
+          topics={state.libraryTopics}
+          notes={state.libraryNotes}
+          flashcards={state.libraryFlashcards}
+          profiles={state.publicProfiles.length ? state.publicProfiles : [state.profile]}
+          shares={state.libraryShares}
+          onCreateCourse={createCourse}
+          onCreateTopic={createTopic}
+          onCreateNote={createNote}
+          onCreateFlashcard={createFlashcard}
+          onShareCourse={shareCourse}
+          onUpdateCourseVisibility={updateCourseVisibility}
+          onCloneCourse={cloneLibraryCourse}
+        />
       ) : null}
       {view === 'evidence' ? (
         <EvidenceCenter evidence={state.evidence} challenges={state.challenges} logs={state.logs} onSoftDeleteEvidence={softDeleteEvidence} />
@@ -609,4 +887,12 @@ async function optionalList<T>(query: PromiseLike<{ data: unknown; error: { mess
   const { data, error } = await query;
   if (error) return [];
   return (data ?? []) as T[];
+}
+
+function uniqueById<T extends { id: string }>(items: T[]) {
+  return Array.from(new Map(items.map((item) => [item.id, item])).values());
+}
+
+function sanitizeFileName(name: string) {
+  return name.trim().replace(/[^a-z0-9._-]/gi, '-').replace(/-+/g, '-').slice(0, 90) || 'archivo';
 }

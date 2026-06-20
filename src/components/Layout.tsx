@@ -1,10 +1,11 @@
-import { Activity, BookOpen, Flame, Gauge, Globe2, LogOut, Swords, Trophy, UploadCloud, User, Users } from 'lucide-react';
+import { Activity, BookOpen, Flame, Gauge, Globe2, LogOut, MessageCircle, Swords, Trophy, UploadCloud, User, Users } from 'lucide-react';
 import type { Duel, Profile, UserMetrics, View } from '../types';
 
 const nav = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: Gauge },
   { id: 'profile' as const, label: 'Mi perfil', icon: User },
   { id: 'users' as const, label: 'Usuarios', icon: Users },
+  { id: 'messages' as const, label: 'Mensajes', icon: MessageCircle },
   { id: 'arena' as const, label: 'Arena', icon: Swords },
   { id: 'habits' as const, label: 'Hábitos', icon: Activity },
   { id: 'challenges' as const, label: 'Retos', icon: Flame },

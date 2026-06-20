@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Search, Trophy, Users } from 'lucide-react';
+import { MessageCircle, Search, Trophy, Users } from 'lucide-react';
 import type { Profile, ProfileStats } from '../types';
 import { NeonCard } from './NeonCard';
 
@@ -7,9 +7,10 @@ type UsersDirectoryProps = {
   currentUserId: string;
   profiles: Profile[];
   stats: ProfileStats[];
+  onStartChat?: (userId: string) => Promise<void>;
 };
 
-export function UsersDirectory({ currentUserId, profiles, stats }: UsersDirectoryProps) {
+export function UsersDirectory({ currentUserId, profiles, stats, onStartChat }: UsersDirectoryProps) {
   const [query, setQuery] = useState('');
   const filteredProfiles = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -42,16 +43,17 @@ export function UsersDirectory({ currentUserId, profiles, stats }: UsersDirector
         </div>
       </div>
       <div className="mt-5 overflow-hidden rounded-lg border border-white/10">
-        <div className="grid grid-cols-[1.4fr_1fr_120px_120px] gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+        <div className="grid grid-cols-[1.4fr_1fr_100px_100px_110px] gap-3 border-b border-white/10 bg-white/[0.03] px-4 py-3 text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
           <span>Usuario</span>
           <span>Descripción</span>
           <span>Ganados</span>
           <span>Racha</span>
+          <span>Chat</span>
         </div>
         {filteredProfiles.map((profile) => {
           const profileStats = stats.find((item) => item.user_id === profile.id);
           return (
-            <div key={profile.id} className="grid grid-cols-[1.4fr_1fr_120px_120px] items-center gap-3 border-b border-white/5 px-4 py-3 last:border-0">
+            <div key={profile.id} className="grid grid-cols-[1.4fr_1fr_100px_100px_110px] items-center gap-3 border-b border-white/5 px-4 py-3 last:border-0">
               <div className="flex items-center gap-3">
                 {profile.avatar_url ? (
                   <img src={profile.avatar_url} alt={`Avatar de ${profile.display_name}`} className="size-10 rounded-md object-cover" />
@@ -74,6 +76,17 @@ export function UsersDirectory({ currentUserId, profiles, stats }: UsersDirector
                 <span className="font-black">{profileStats?.duels_won ?? 0}</span>
               </div>
               <p className="font-black text-forge-green">{profileStats?.duel_streak ?? 0}</p>
+              {profile.id !== currentUserId && onStartChat ? (
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-md border border-forge-blue/30 bg-forge-blue/10 px-3 py-2 text-sm font-bold text-forge-blue hover:bg-forge-blue hover:text-black"
+                  onClick={() => void onStartChat(profile.id)}
+                >
+                  <MessageCircle size={15} />
+                  Chat
+                </button>
+              ) : (
+                <span className="text-sm text-slate-500">-</span>
+              )}
             </div>
           );
         })}
@@ -84,4 +97,3 @@ export function UsersDirectory({ currentUserId, profiles, stats }: UsersDirector
     </NeonCard>
   );
 }
-

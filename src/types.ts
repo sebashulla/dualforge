@@ -1,6 +1,6 @@
 import type { Session } from '@supabase/supabase-js';
 
-export type View = 'dashboard' | 'profile' | 'users' | 'arena' | 'habits' | 'challenges' | 'openChallenges' | 'library' | 'evidence';
+export type View = 'dashboard' | 'profile' | 'users' | 'messages' | 'arena' | 'habits' | 'challenges' | 'openChallenges' | 'library' | 'evidence';
 
 export type Difficulty = 'easy' | 'medium' | 'hard' | 'legendary';
 export type Visibility = 'private' | 'shared_progress' | 'shared_full' | 'duel' | 'public';
@@ -9,6 +9,7 @@ export type ContinuationStatus = 'undecided' | 'finished' | 'continued';
 export type EvidenceType = 'image' | 'text' | 'document' | 'link' | 'reflection';
 export type OpenChallengeStatus = 'open' | 'active' | 'completed' | 'cancelled';
 export type OpenChallengeParticipantStatus = 'joined' | 'completed' | 'left';
+export type ChatAttachmentKind = 'image' | 'audio' | 'video' | 'file';
 
 export type Profile = {
   id: string;
@@ -220,6 +221,47 @@ export type LibraryFlashcard = {
   updated_at: string;
 };
 
+export type LibraryShare = {
+  id: string;
+  course_id: string;
+  owner_user_id: string;
+  recipient_user_id: string;
+  created_at: string;
+};
+
+export type ChatThread = {
+  id: string;
+  created_by: string;
+  started_at: string;
+  expires_at: string;
+  created_timezone: string;
+  updated_at: string;
+};
+
+export type ChatParticipant = {
+  id: string;
+  thread_id: string;
+  user_id: string;
+  joined_at: string;
+  profiles?: Profile;
+};
+
+export type ChatMessage = {
+  id: string;
+  thread_id: string;
+  sender_id: string;
+  body: string | null;
+  attachment_kind: ChatAttachmentKind | null;
+  attachment_path: string | null;
+  attachment_url?: string | null;
+  attachment_name: string | null;
+  attachment_mime: string | null;
+  attachment_size: number | null;
+  created_at: string;
+  expires_at: string;
+  deleted_at: string | null;
+};
+
 export type AppState = {
   session: Session | null;
   profile: Profile | null;
@@ -240,6 +282,10 @@ export type AppState = {
   libraryTopics: LibraryTopic[];
   libraryNotes: LibraryNote[];
   libraryFlashcards: LibraryFlashcard[];
+  libraryShares: LibraryShare[];
+  chatThreads: ChatThread[];
+  chatParticipants: ChatParticipant[];
+  chatMessages: ChatMessage[];
 };
 
 export type UserMetrics = {
